@@ -6,19 +6,27 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       sliderInput("cR0", "Βασικός αναπαραγωγικός αριθμός (R0)", 
-                  min=1, max=4, value=2.2, step=0.1),
+                min=0.5, max=4, value=2.2, step=0.1),
       sliderInput("cR0min", "Ελάχιστος βασικός αναπαραγωγικός αριθμός (R0)", 
-                  min=0.5, max=4, value=2.2, step=0.1),
-      helpText("Η περιοδικότητα στη μεταδοτικότητα του ιού αναπαριστάται με ημιτονοειδή καμπύλη με μέγιστο στις 1 Φεβρουαρίου και ελάχιστο την 1 Αυγούστου"),
-      sliderInput("cTg", "Χρόνος γενεάς", 
-                  min=3, max=12, value=7.5, step=0.2),
+                min=0.5, max=4, value=2.2, step=0.1),
       fluidRow(
-      column(8, sliderInput("cIni", "Αριθμός μολυσματικών κατά την έναρξη", 
-                  min=0, max=1000, value=100, step=10)),
-      column(4, dateInput("cStartDate", "Έναρξη επιδημίας", value="2020-3-1", min="2020-2-1", max="2020-4-1", format="dd/mm/yyyy"))),
+        column(8, helpText("Η περιοδικότητα στη μεταδοτικότητα του ιού αναπαριστάται με ημιτονοειδή καμπύλη με ελάχιστο μέσα στο καλοκαίρι")),
+        column(4, dateInput("cMinD", "Πότε ακριβώς?", value="2020-8-1", 
+                min="2020-6-1", max="2020-8-31", format="dd/mm/yyyy"))
+      ),
+      sliderInput("cTg", "Χρόνος γενεάς", 
+                min=3, max=12, value=7.5, step=0.2),
+      sliderInput("cLat", "Μέση περίοδος επώασης", 
+                min=3, max=12, value=5, step=0.2),
+      fluidRow(
+        column(8, sliderInput("cIni", "Αριθμός μολυσματικών κατά την έναρξη", 
+                min=0, max=1000, value=100, step=10)),
+        column(4, dateInput("cStartDate", "Έναρξη επιδημίας", value="2020-3-1", 
+                min="2020-2-1", max="2020-4-1", format="dd/mm/yyyy"))
+      ),
       sliderInput("cIntros", "Επιπλέον εισαγωγές μολυσματικών ανά ημέρα", 
                   min=0, max=20, value=0, step=1),
-      dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-7-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy")
+      dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-10-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy")
     ),
     mainPanel(
       plotOutput("SIRplot"),
@@ -28,25 +36,42 @@ ui <- fluidPage(
   )
 )
 
-server <- function(input, output) {
+server <- function(input, output, session) {
+  
+  observe({
+    if (input$cLat>input$cTg-0.2) updateSliderInput(session, "cLat", value=input$cTg-0.2)
+  })
+  
+  observe({
+    if (input$cR0min>input$cR0) updateSliderInput(session, "cR0min", value=input$cR0)
+  })
+
   
   dat <- reactive({
     R0min <- min(input$cR0, input$cR0min)
+    R0 <- input$cR0
+    L <- input$cLat
+    V <- input$cTg
+    D <- (V - L)*2
     a <- data.frame(
       date = seq.Date(input$cStartDate, input$cStopDate, by="days"),
-      S = 0, I = 0, R = 0, dI = 0, dR = 0, beta=input$cR0/input$cTg
+      S = 0, E = 0, I = 0, R = 0, dE = 0, dI = 0, dR = 0, 
+      beta=R0/D, D=D
     )
     a$S[1] <- 11000000
     a$I[1] <- input$cIni
-    a$beta <- ((cos((as.integer(format(a$date, "%j"))-30)*2*pi/366)+1)/2*(input$cR0-R0min) + R0min)/input$cTg
-    
-    gamma <- 1/input$cTg
+    minD <- as.integer(format(input$cMinD, "%j"))
+    a$beta <- ((cos((as.integer(format(a$date, "%j"))-(minD-183))*2*pi/366)+1)/2*(R0-R0min) + R0min)/D
+    kappa <- 1/L
+    gamma <- 1/D
     for (t in 2:nrow(a)) {
-      a$dI[t] <- round((1 - exp(-a$beta[t]*a$I[t-1]/a$S[1]))*a$S[t-1]) + input$cIntros
+      a$dE[t] <- round((1 - exp(-a$beta[t]*a$I[t-1]/a$S[1]))*a$S[t-1])
+      a$dI[t] <- round((1 - exp(-kappa))*a$E[t-1])
       a$dR[t] <- round((1 - exp(-gamma))*a$I[t-1])
-      a$I[t] <- a$I[t-1] + a$dI[t] - a$dR[t]
+      a$E[t] <- a$E[t-1] + a$dE[t] - a$dI[t]
+      a$I[t] <- a$I[t-1] + a$dI[t] - a$dR[t] + input$cIntros
       a$R[t] <- a$R[t-1] + a$dR[t]
-      a$S[t] <- a$S[1] - a$I[t] - a$R[t]
+      a$S[t] <- a$S[1] - a$E[t] - a$I[t] - a$R[t]
     }
     return(a)
   })
@@ -58,7 +83,7 @@ server <- function(input, output) {
       )
       points(date, I, type="l", lwd=2, col="red")
       points(date, R, type="l", lwd=2, col="blue")
-      legend("top", c("Susceptible","Infected","Removed"), bty="n", horiz=TRUE,
+      legend("top", c("Susceptible","Infectious","Removed"), bty="n", horiz=TRUE,
         col=c("green","red","blue"), lwd=2, xpd=NA, inset=c(0,-0.12))
       axis(2, at=(0:11)*10^6, labels=rep(NA, 12), tcl=-0.2)
       axis(2, at=c(0,5,10)*10^6, labels=c(0, "5.000.000", "10.000.000"))
@@ -68,7 +93,7 @@ server <- function(input, output) {
   
   output$caseplot <- renderPlot({
     with(dat(), {
-      plot(date, I, type="h", col="red", lend=1, lwd=4, bty="l",
+      plot(date, dE, type="h", col="red", lend=1, lwd=4, bty="l",
         main="Αριθμός νέών μολύνσεων",
         ylab="Αριθμός μολύνσεων", xlab="Ημερομηνία"
       )
@@ -78,7 +103,7 @@ server <- function(input, output) {
   
   output$R0plot <- renderPlot({
     with(dat(), {
-      plot(date, beta*input$cTg, type="l", col="purple", lwd=3, bty="l",
+      plot(date, beta*D, type="l", col="purple", lwd=3, bty="l",
         main="Βασικός αναπαραγωγικός αριθμός (ενσωμάτωση περιοδικότητας)",
         ylab="Βασικός αναπαραγωγικός αριθμός (R0)", xlab="Ημερομηνία"
       )
