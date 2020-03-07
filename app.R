@@ -26,7 +26,19 @@ ui <- fluidPage(
       ),
       sliderInput("cIntros", "Επιπλέον εισαγωγές μολυσματικών ανά ημέρα", 
                   min=0, max=20, value=0, step=1),
-      dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-10-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy")
+      dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-10-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy"),
+      checkboxInput("sCntTrc", "Contact tracing"),
+      conditionalPanel("input.sCntTrc", 
+        wellPanel(
+          sliderInput("cAsc", "Ascertainment ratio (%)", min=0, max=50, value=10),
+          sliderInput("cPctCnt", "Ποσοστό (%) επαφών των ανωτέρω που διερευνώνται και απομονώνονται αποτελεσματικά",
+            min=0, max=100, value=0, step=1),
+          helpText("Θέσατε 0 για να σταματήσετε το contact tracing."),
+          sliderInput("cMaxCnt", "Μέγιστος αριθμός επαφών που μπορούν να διερευνηθούν και να απομονωθούν αποτελεσματικά ανά ημέρα",
+            min=0, max=1000, value=0, step=5),
+          helpText("Θέσατε 0 αν νομίζετε οτι το contact tracing μπορεί να κλιμακωθεί επ'αόριστον.")
+        )
+      )
     ),
     mainPanel(
       plotOutput("SIRplot"),
@@ -68,9 +80,11 @@ server <- function(input, output, session) {
       a$dE[t] <- round((1 - exp(-a$beta[t]*a$I[t-1]/a$S[1]))*a$S[t-1])
       a$dI[t] <- round((1 - exp(-kappa))*a$E[t-1])
       a$dR[t] <- round((1 - exp(-gamma))*a$I[t-1])
-      a$E[t] <- a$E[t-1] + a$dE[t] - a$dI[t]
+        cntRemoved <- round(input$cPctCnt*input$cAsc/100/100*a$dE[t])
+        if (input$cMaxCnt!=0 & input$cMaxCnt<cntRemoved) cntRemoved <- input$cMaxCnt
+      a$E[t] <- a$E[t-1] + a$dE[t] - a$dI[t] - cntRemoved
       a$I[t] <- a$I[t-1] + a$dI[t] - a$dR[t] + input$cIntros
-      a$R[t] <- a$R[t-1] + a$dR[t]
+      a$R[t] <- a$R[t-1] + a$dR[t] + cntRemoved
       a$S[t] <- a$S[1] - a$E[t] - a$I[t] - a$R[t]
     }
     return(a)
