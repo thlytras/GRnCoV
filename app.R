@@ -1,32 +1,44 @@
 library(shiny)
+source("miniFileInput.R")
 
 ui <- fluidPage(
   titlePanel("Μοντέλο εξέλιξης επιδημίας COVID-19 στην Ελλάδα"),
 
   sidebarLayout(
     sidebarPanel(
-      sliderInput("cR0", "Βασικός αναπαραγωγικός αριθμός (R0)", 
-                min=0.5, max=4, value=2.2, step=0.1),
-      sliderInput("cR0min", "Ελάχιστος βασικός αναπαραγωγικός αριθμός (R0)", 
-                min=0.5, max=4, value=2.2, step=0.1),
-      fluidRow(
-        column(8, helpText("Η περιοδικότητα στη μεταδοτικότητα του ιού αναπαριστάται με ημιτονοειδή καμπύλη με ελάχιστο μέσα στο καλοκαίρι")),
-        column(4, dateInput("cMinD", "Πότε ακριβώς?", value="2020-8-1", 
-                min="2020-6-1", max="2020-8-31", format="dd/mm/yyyy"))
+      wellPanel(
+        sliderInput("cR0", "Βασικός αναπαραγωγικός αριθμός (R0)", 
+                  min=0.5, max=4, value=2.2, step=0.1),
+        sliderInput("cTg", "Χρόνος γενεάς", 
+                  min=3, max=12, value=7.5, step=0.2),
+        sliderInput("cLat", "Μέση περίοδος επώασης", 
+                  min=3, max=12, value=5, step=0.2),
+        sliderInput("cIFR", "Infection Fatality Rate (%)", 
+                  min=0, max=2, value=0.05, step=0.01)
       ),
-      sliderInput("cTg", "Χρόνος γενεάς", 
-                min=3, max=12, value=7.5, step=0.2),
-      sliderInput("cLat", "Μέση περίοδος επώασης", 
-                min=3, max=12, value=5, step=0.2),
-      fluidRow(
-        column(8, sliderInput("cIni", "Αριθμός μολυσματικών κατά την έναρξη", 
-                min=0, max=1000, value=100, step=10)),
-        column(4, dateInput("cStartDate", "Έναρξη επιδημίας", value="2020-3-1", 
-                min="2020-2-1", max="2020-4-1", format="dd/mm/yyyy"))
+      wellPanel(
+        fluidRow(
+          column(8, sliderInput("cIni", "Αριθμός μολυσματικών κατά την έναρξη", 
+                  min=0, max=5000, value=500, step=100)),
+          column(4, dateInput("cStartDate", "Έναρξη επιδημίας", value="2020-3-1", 
+                  min="2020-2-1", max="2020-4-1", format="dd/mm/yyyy"))
+        ),
+        sliderInput("cIntros", "Επιπλέον εισαγωγές μολυσματικών ανά ημέρα", 
+                    min=0, max=50, value=0, step=1),
+        dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-10-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy")
       ),
-      sliderInput("cIntros", "Επιπλέον εισαγωγές μολυσματικών ανά ημέρα", 
-                  min=0, max=20, value=0, step=1),
-      dateInput("cStopDate", "Προβολή επιδημίας έως", value="2020-10-1", min="2020-5-1", max="2021-7-1", format="dd/mm/yyyy"),
+      checkboxInput("sSeasonal", "Εποχικότητα"),
+      conditionalPanel("input.sSeasonal", 
+        wellPanel(
+          sliderInput("cR0min", "Ελάχιστος βασικός αναπαραγωγικός αριθμός (R0)", 
+                    min=0.5, max=4, value=2.2, step=0.1),
+          fluidRow(
+            column(8, helpText("Η εποχικότητα στη μεταδοτικότητα του ιού αναπαριστάται με ημιτονοειδή καμπύλη με ελάχιστο μέσα στο καλοκαίρι")),
+            column(4, dateInput("cMinD", "Πότε ακριβώς?", value="2020-8-1", 
+                    min="2020-6-1", max="2020-8-31", format="dd/mm/yyyy"))
+          )
+        )
+      ),
       checkboxInput("sCntTrc", "Διερεύνηση επαφών"),
       conditionalPanel("input.sCntTrc", 
         wellPanel(
@@ -56,26 +68,35 @@ ui <- fluidPage(
           ),
           helpText("Θεωρούμε (πολύ απλουστευτικά) οτι από τα ~2 εκατ. μαθητών/φοιτητών ένα ποσοστό αφαιρείται από το pool των επίνοσων.")
         )
+      ),
+      fluidRow(
+        column(6, downloadButton("cSave", "Αποθήκευση σεναρίου", style="width:100%")),
+        column(6, miniFileInput("cLoad", "Άνοιγμα σεναρίου", accept = c('application/octet-stream')))
       )
     ),
     mainPanel(
       plotOutput("SIRplot"),
       plotOutput("caseplot"),
-      plotOutput("R0plot")
+      plotOutput("R0plot"),
+      plotOutput("deadplot")
     )
   )
 )
 
 server <- function(input, output, session) {
-  
+
+  slidersC <- c("cR0", "cTg", "cLat", "cIni", "cIntros", "cR0min", 
+    "cAsc", "cPctCnt", "cMaxCnt", "cSympPct", "cSympDelay", 
+    "cBetaDec", "cSchoolEff", "cIFR", "cICUrate")# "cHospRate"
+  datesC <- c("cStartDate", "cStopDate", "cMinD", "cBetaDecDate", "cSchoolDate")
+
   observe({
     if (input$cLat>input$cTg-0.2) updateSliderInput(session, "cLat", value=input$cTg-0.2)
   })
   
   observe({
-    if (input$cR0min>input$cR0) updateSliderInput(session, "cR0min", value=input$cR0)
+    if (input$cR0min>input$cR0 || !isolate(input$sSeasonal)) updateSliderInput(session, "cR0min", value=input$cR0)
   })
-
   
   dat <- reactive({
     R0min <- min(input$cR0, input$cR0min)
@@ -94,7 +115,6 @@ server <- function(input, output, session) {
     a$beta <- ((cos((as.integer(format(a$date, "%j"))-(minD-183))*2*pi/366)+1)/2*(R0-R0min) + R0min)/D
     a$beta[which(a$date >= input$cBetaDecDate)] <- a$beta[which(a$date >= input$cBetaDecDate)] * (100 - input$cBetaDec)/100
     kappa <- 1/L
-#    gamma <- 1/D
     gamma <- 1/(D - max(0, D-input$cSympDelay)*input$cSympPct/100)
     for (t in 2:nrow(a)) {
       a$dE[t] <- round((1 - exp(-a$beta[t]*a$I[t-1]/a$S[1]))*a$S[t-1])
@@ -120,7 +140,7 @@ server <- function(input, output, session) {
   output$SIRplot <- renderPlot({
     with(dat(), {
       plot(date, S, type="l", lwd=2, col="green", ylim=c(0,S[1]),
-        ylab="Αριθμός ατόμων", xlab="Ημερομηνία", bty="l", yaxt="n"
+        ylab="Αριθμός ατόμων", xlab="Ημερομηνία", bty="l", yaxt="n", xaxt="n"
       )
       points(date, I, type="l", lwd=2, col="red")
       points(date, R, type="l", lwd=2, col="blue")
@@ -129,6 +149,8 @@ server <- function(input, output, session) {
       axis(2, at=(0:11)*10^6, labels=rep(NA, 12), tcl=-0.2)
       axis(2, at=c(0,5,10)*10^6, labels=c(0, "5.000.000", "10.000.000"))
       abline(h=(0:11)*10^6, lty="dotted", col="grey")
+      axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
+        labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
     })
   })
   
@@ -136,20 +158,63 @@ server <- function(input, output, session) {
     with(dat(), {
       plot(date, dE, type="h", col="red", lend=1, lwd=4, bty="l",
         main="Αριθμός νέών μολύνσεων",
-        ylab="Αριθμός μολύνσεων", xlab="Ημερομηνία"
+        ylab="Αριθμός μολύνσεων", xlab="Ημερομηνία", xaxt="n"
       )
       abline(h=seq(0,11000000,500000), lty="dotted", col="grey")
+      axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
+        labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
     })
   })
   
   output$R0plot <- renderPlot({
     with(dat(), {
-      plot(date, beta*D, type="l", col="purple", lwd=3, bty="l",
-        main="Βασικός αναπαραγωγικός αριθμός (ενσωμάτωση περιοδικότητας)",
-        ylab="Βασικός αναπαραγωγικός αριθμός (R0)", xlab="Ημερομηνία"
+      plot(date, beta*D, type="l", col="orange", lwd=3, bty="l",
+        main="Βασικός αναπαραγωγικός αριθμός (ενσωμάτωση εποχικότητας)",
+        ylab="Βασικός αναπαραγωγικός αριθμός (R0)", xlab="Ημερομηνία", xaxt="n"
       )
+      axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
+        labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
     })
   })
+
+  output$deadplot <- renderPlot({
+    with(dat(), {
+      a <- which(as.integer(format(date, "%d"))==1)
+      a <- c(a[2:5], rev(a)[1])
+      plot(date, cumsum(round(dI*input$cIFR/100)), type="l", lwd=2, bty="l",
+        main="Συνολικός αριθμός νεκρών", col="purple",
+        ylab="Αριθμός ατόμων", xlab="Ημερομηνία", xaxt="n"
+      )
+      legend("topleft", sprintf("Στις %s:  %s", format(date[a], "%d %B %Y"), 
+        cumsum(round(dI*input$cIFR/100))[a]), bty="n")
+      axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
+        labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
+    })
+  })
+
+  output$cSave <- downloadHandler(
+    filename = function() {
+      "scenario.rds"
+    },
+    content = function(file) {
+      res <- lapply(c(slidersC, datesC), function(x) input[[x]])
+      names(res) <- c(slidersC, datesC)
+      saveRDS(res, file=file)
+    }
+  )
+
+  observeEvent(input$cLoad, {
+    if (is.null(input$cLoad)) return()
+    inFile <- input$cLoad
+    v <- try(readRDS(inFile$datapath), silent=TRUE)
+      # Has the file been read successfully?
+    if (length(v)==1 && class(m)=="try-error") {
+      return()
+    }
+    if (v$cR0 != v$cR0min) updateCheckboxInput(session, "sSeasonal", value=TRUE)
+    for (n in slidersC) updateSliderInput(session, n, value = v[[n]])
+    for (n in datesC) updateDateInput(session, n, value = v[[n]])
+  }, ignoreInit=TRUE)
 
 }
 
