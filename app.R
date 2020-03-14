@@ -1,6 +1,14 @@
 library(shiny)
 source("miniFileInput.R")
 
+
+vecshift <- function(x, shift=0) {
+  if (shift==0) return(x)
+  if (shift>0) return(c(x[-(1:shift)], rep(NA,shift)))
+  if (shift<0) return(c(rep(NA, -shift), x[1:(length(x)+shift)]))
+}
+
+
 ui <- fluidPage(
   titlePanel("Μοντέλο εξέλιξης επιδημίας COVID-19 στην Ελλάδα"),
 
@@ -12,9 +20,7 @@ ui <- fluidPage(
         sliderInput("cTg", "Χρόνος γενεάς", 
                   min=3, max=12, value=7.5, step=0.2),
         sliderInput("cLat", "Μέση περίοδος επώασης", 
-                  min=3, max=12, value=5, step=0.2),
-        sliderInput("cIFR", "Infection Fatality Rate (%)", 
-                  min=0, max=2, value=0.05, step=0.01)
+                  min=3, max=12, value=5, step=0.2)
       ),
       wellPanel(
         fluidRow(
@@ -69,6 +75,17 @@ ui <- fluidPage(
           helpText("Θεωρούμε (πολύ απλουστευτικά) οτι από τα ~2 εκατ. μαθητών/φοιτητών ένα ποσοστό αφαιρείται από το pool των επίνοσων.")
         )
       ),
+      checkboxInput("sImpact", "Αντίκτυπος (Impact)"),
+      conditionalPanel("input.sImpact", 
+        wellPanel(
+          sliderInput("cIFR", "Infection Fatality Rate (%)", 
+            min=0, max=2, value=0.05, step=0.01),
+          sliderInput("cICUrate", "% μολύνσεων που θα χρειαστούν Μονάδα Εντατικής Θεραπείας (ΜΕΘ)", 
+            min=0, max=5, value=0.20, step=0.05),
+          sliderInput("cICUlen", "Μέση διάρκεια παραμονής στη ΜΕΘ (ημέρες)", 
+            min=1, max=20, value=10, step=1)
+        )
+      ),
       fluidRow(
         column(6, downloadButton("cSave", "Αποθήκευση σεναρίου", style="width:100%")),
         column(6, miniFileInput("cLoad", "Άνοιγμα σεναρίου", accept = c('application/octet-stream')))
@@ -78,7 +95,9 @@ ui <- fluidPage(
       plotOutput("SIRplot"),
       plotOutput("caseplot"),
       plotOutput("R0plot"),
-      plotOutput("deadplot")
+      plotOutput("deadplot"),
+      plotOutput("ICUplot"),
+      verbatimTextOutput("outConsole")
     )
   )
 )
@@ -87,8 +106,10 @@ server <- function(input, output, session) {
 
   slidersC <- c("cR0", "cTg", "cLat", "cIni", "cIntros", "cR0min", 
     "cAsc", "cPctCnt", "cMaxCnt", "cSympPct", "cSympDelay", 
-    "cBetaDec", "cSchoolEff", "cIFR", "cICUrate")# "cHospRate"
+    "cBetaDec", "cSchoolEff", "cIFR", "cICUrate", "cICUlen")
   datesC <- c("cStartDate", "cStopDate", "cMinD", "cBetaDecDate", "cSchoolDate")
+
+  maxICU <- reactiveVal(0)
 
   observe({
     if (input$cLat>input$cTg-0.2) updateSliderInput(session, "cLat", value=input$cTg-0.2)
@@ -189,6 +210,36 @@ server <- function(input, output, session) {
         cumsum(round(dI*input$cIFR/100))[a]), bty="n")
       axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
         labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
+    })
+  })
+
+  output$ICUplot <- renderPlot({
+    with(dat(), {
+      icu <- round(dI*input$cICUrate/100)
+      icu <- sapply(0:(input$cICUlen-1), function(i) vecshift(icu, -i))
+      icu[is.na(icu)] <- 0
+      icu <- rowSums(icu)
+      maxICU(max(icu))
+      plot(date, icu, type="l", lwd=2, bty="l",
+        main="Ανάγκες σε κλίνες ΜΕΘ", col="darkred",
+        ylab="Αριθμός Κλινών", xlab="Ημερομηνία", xaxt="n"
+      )
+      axis(1, at=date[which(as.integer(format(date, "%d"))==1)],
+        labels=format(date[which(as.integer(format(date, "%d"))==1)], "%b"))
+    })
+  })
+
+  output$outConsole <- renderText({
+    with(dat(), {
+      res <- c(
+        "Στο τέλος της προβολής:",
+        sprintf("-- Συνολικός αριθμός προσβληθέντων = %s", S[1] - rev(E)[1] - rev(R)[1] - rev(I)[1]),
+        sprintf("-- Συνολικός αριθμός νεκρών = %s", sum(round(dI*input$cIFR/100))),
+        "",
+        sprintf("Μέγιστος αριθμός μολυσματικών = %s", max(I)), 
+        sprintf("Μέγιστη χρήση κλινών ΜΕΘ = %s", maxICU())
+      )
+      paste(res, collapse="\n")
     })
   })
 
